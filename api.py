@@ -14,14 +14,19 @@ def ensure_skills_is_array(job):
         job["skills"] = [s.strip() for s in skills.split(",") if s.strip()]
     return job
 
+import os
+
 @app.route('/parse-cv', methods=['POST'])
 def parse_cv():
     file = request.files['file']
-    with tempfile.NamedTemporaryFile(delete=False, suffix=file.filename.split('.')[-1]) as tmp:
+    ext = os.path.splitext(file.filename)[1] or ".pdf"
+    with tempfile.NamedTemporaryFile(delete=False, suffix=ext) as tmp:
         tmp.write(file.read())
         tmp_path = tmp.name
     result = crew.parse_cv(tmp_path)
     return jsonify(result)
+
+
 
 @app.route('/match-jobs', methods=['POST'])
 def match_jobs():

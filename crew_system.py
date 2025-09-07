@@ -4,9 +4,45 @@ from langchain_community.llms import Ollama
 import json
 from utils import extract_text_from_file, load_job_descriptions, detect_language
 
+def _extract_json_payload(text: str):
+    """Extract a valid JSON object/array from LLM output (handles ``` fences)."""
+    s = str(text).strip()
+
+    # strip fenced blocks like ```json ... ``` or ``` ... ```
+    if s.startswith("```"):
+        # remove leading and trailing triple backticks
+        s = s.strip("`").strip()
+        # drop optional 'json' language tag
+        if s.lower().startswith("json"):
+            s = s[4:].strip()
+
+    # try object
+    start = s.find("{")
+    end = s.rfind("}")
+    if start != -1 and end != -1 and start < end:
+        return s[start:end + 1]
+
+    # try array
+    start = s.find("[")
+    end = s.rfind("]")
+    if start != -1 and end != -1 and start < end:
+        return s[start:end + 1]
+
+    return None
+
+
+
 class CVProcessingCrew:
     def __init__(self):
-        self.llm = Ollama(model="ollama/llama3.1:8b", base_url="http://localhost:11434")
+        self.llm =  Ollama(
+            model="ollama/llama3.1:8b",                 # ✅ no "ollama/" prefix
+            base_url="http://localhost:11434",
+            num_ctx=1024,                        # keep small for 4GB VRAM
+            num_thread=4,                        # adjust to your CPU
+            num_gpu=1,                           # use your GTX 1650
+            num_predict=256,                     # shorter generations = lower mem                    # smaller batch = lower VRAM/RAM
+            temperature=0.2                    # (optional)
+            )
         self.setup_agents()
     
     def setup_agents(self):
@@ -121,12 +157,16 @@ class CVProcessingCrew:
         )
         
         result = crew.kickoff()
+        payload = _extract_json_payload(result)
         
-        try:
-            return json.loads(str(result))
-        except json.JSONDecodeError:
-            # Fallback if JSON parsing fails
-            return {"error": "Failed to parse CV", "raw_output": str(result)}
+        if payload:
+            try:
+                return json.loads(payload)
+            except json.JSONDecodeError:
+                pass  # fall through to fallback below
+
+        # Fallback if JSON parsing still fails
+        return {"error": "Failed to parse CV", "raw_output": str(result)}
     
     def match_jobs(self, parsed_cv, job_descriptions):
         """Match parsed CV with jobs from input, not from utils.py"""
@@ -182,10 +222,14 @@ class CVProcessingCrew:
         )
 
         result = crew.kickoff()
-        try:
-            return json.loads(str(result))
-        except json.JSONDecodeError:
-            return {"matches": [], "error": "Failed to match jobs", "raw_output": str(result)}
+        payload = _extract_json_payload(result)
+        if payload:
+            try:
+                return json.loads(payload)
+            except json.JSONDecodeError:
+                pass
+
+        return {"matches": [], "error": "Failed to match jobs", "raw_output": str(result)}
     
     def generate_quiz(self, parsed_cv, selected_job):
         """Generate quiz based on job requirements and candidate profile"""
@@ -252,8 +296,11 @@ class CVProcessingCrew:
         )
 
         result = crew.kickoff()
+        payload = _extract_json_payload(result)
+        if payload:
+            try:
+                return json.loads(payload)
+            except json.JSONDecodeError:
+                pass
 
-        try:
-            return json.loads(str(result))
-        except json.JSONDecodeError:
-            return {"error": "Failed to generate quiz", "raw_output": str(result)}
+        return {"error": "Failed to generate quiz", "raw_output": str(result)}
